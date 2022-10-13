@@ -12,7 +12,7 @@ entity FixedDebounce is
         CLOCK_EDGE     : std_logic := '1'  -- Process clock edge
     );
     port (
-        nreset : in std_logic := '0'; -- optional
+        nreset : in std_logic := '1'; -- optional
         clock  : in std_logic;
         input  : in std_logic_vector(N - 1 downto 0);
         output : out std_logic_vector(N - 1 downto 0)
@@ -20,7 +20,7 @@ entity FixedDebounce is
 end entity;
 
 architecture RTL of FixedDebounce is
-    -- bits required to hold counter counting to STABLE_CYCLES - 1
+    -- Bits required to hold counter counting to STABLE_CYCLES - 1
     constant REQUIRED_BITS : natural := CFXS.Utils.RequiredBits(STABLE_CYCLES);
     -- Array type of counter values
     type CounterArray_t is array (N - 1 downto 0) of unsigned(REQUIRED_BITS - 1 downto 0);
