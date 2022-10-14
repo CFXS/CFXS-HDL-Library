@@ -40,14 +40,9 @@ architecture RTL of Interface_SWD is
     signal reg_SWCLK_DividerCounter : unsigned(SWCLK_DIV_WIDTH - 1 downto 0) := (others => '0');
     signal clock_SWCLK_Divided      : std_logic                              := '0';
 
-    -- Requests
-    signal reg_SendLineReset      : std_logic := '0'; -- request to send line reset
-    signal reg_SendSwitchSequence : std_logic := '0'; -- request to send switch sequence
-
     -- [SendLineReset]
-    constant LINE_RESET_HIGH_BITS   : natural := 60 - 1; -- at least 50 clocks required
-    constant LINE_RESET_LOW_BITS    : natural := 4;      -- at least 2 idle bits required to complete reset
-    signal reg_LineReset_InProgress : boolean := false;
+    constant LINE_RESET_HIGH_BITS : natural := 60 - 1; -- at least 50 clocks required
+    constant LINE_RESET_LOW_BITS  : natural := 4;      -- at least 2 idle bits required to complete reset
     -- Clocks sent
     signal reg_LineReset_ClocksSent : unsigned(RequiredBits(LINE_RESET_HIGH_BITS) - 1 downto 0) := (others => '0');
 
@@ -84,7 +79,7 @@ architecture RTL of Interface_SWD is
     signal reg_SWD_SubState     : SWD_SubState_t := SUB_IDLE;
     signal reg_SWD_NextSubState : SWD_SubState_t := SUB_IDLE;
 
-    signal reg_SWCLK_TriggerPulse : std_logic := '0'; -- Pulse on SWCLK rising edge synced to module clock
+    signal reg_SWCLK_EdgePulse : std_logic := '0'; -- Pulse on SWCLK edge synced to module clock
 begin
     ------------------------------------------------------------------------
     -- Clock divider for SWCLK
@@ -102,6 +97,7 @@ begin
 
     ------------------------------------------------------------------------
 
+    -- Generate 1 clock long pulse on protocol clock edge
     instance_ProtocolClockPulse : entity CFXS.PulseGenerator
         generic map(
             IDLE_OUTPUT  => '0',
@@ -109,8 +105,8 @@ begin
         )
         port map(
             clock   => clock,
-            trigger => clock_SWCLK_Divided,
-            output  => reg_SWCLK_TriggerPulse
+            trigger => clock_SWCLK_Divided, -- rising edge
+            output  => reg_SWCLK_EdgePulse
         );
 
     process (all)
@@ -129,7 +125,7 @@ begin
                 end if;
             end if;
 
-            if (reg_SWCLK_TriggerPulse = '1') then -- synced rising edge of protocol clock
+            if (reg_SWCLK_EdgePulse = '1') then -- synced rising edge of protocol clock
                 -- [LINE_RESET]
                 if (reg_SWD_State = STATE_LINE_RESET) then
                     en_SWCLK  <= true;       -- enable clock
