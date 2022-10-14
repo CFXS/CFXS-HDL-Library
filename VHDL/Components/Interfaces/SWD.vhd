@@ -40,21 +40,16 @@ architecture RTL of Interface_SWD is
     signal reg_SWCLK_DividerCounter : unsigned(SWCLK_DIV_WIDTH - 1 downto 0) := (others => '0');
     signal clock_SWCLK_Divided      : std_logic                              := '0';
 
-    -- Status registers
-    signal reg_Status_Busy : std_logic := '0';
-
     -- Requests
     signal reg_SendLineReset      : std_logic := '0'; -- request to send line reset
     signal reg_SendSwitchSequence : std_logic := '0'; -- request to send switch sequence
 
     -- [SendLineReset]
-    constant LINE_RESET_HIGH_BITS   : natural := 56; -- at least 50 clocks required
-    constant LINE_RESET_LOW_BITS    : natural := 2;  -- at least 2 idle bits required to complete reset
+    constant LINE_RESET_HIGH_BITS   : natural := 60 - 1; -- at least 50 clocks required
+    constant LINE_RESET_LOW_BITS    : natural := 4;      -- at least 2 idle bits required to complete reset
     signal reg_LineReset_InProgress : boolean := false;
-    -- high bits to send
-    signal reg_LineReset_HighBitsToSend : unsigned(RequiredBits(LINE_RESET_HIGH_BITS) - 1 downto 0) := (others => '0');
-    -- low bits to send
-    signal reg_LineReset_LowBitsToSend : unsigned(RequiredBits(LINE_RESET_LOW_BITS) - 1 downto 0) := (others => '0');
+    -- Clocks sent
+    signal reg_LineReset_ClocksSent : unsigned(RequiredBits(LINE_RESET_HIGH_BITS) - 1 downto 0) := (others => '0');
 
     -- SWDIO direction control
     type DataDirection_t is (DIR_INPUT, DIR_OUTPUT);
@@ -65,6 +60,31 @@ architecture RTL of Interface_SWD is
 
     -- Pins
     signal reg_SWDIO : std_logic := '0';
+
+    --------------------------------------
+    -- [Protocol]
+
+    -- Main state machine state
+    type SWD_State_t is (
+        STATE_IDLE,
+        STATE_LINE_RESET,
+        STATE_SWITCH_SEQUENCE
+    );
+
+    -- State steps
+    type SWD_SubState_t is (
+        SUB_IDLE,
+        SUB_LINE_RESET_HIGH,
+        SUB_LINE_RESET_LOW,
+        SUB_SWITCH_DATA
+    );
+
+    signal reg_SWD_State        : SWD_State_t    := STATE_IDLE;
+    signal reg_SWD_NextState    : SWD_State_t    := STATE_IDLE;
+    signal reg_SWD_SubState     : SWD_SubState_t := SUB_IDLE;
+    signal reg_SWD_NextSubState : SWD_SubState_t := SUB_IDLE;
+
+    signal reg_SWCLK_TriggerPulse : std_logic := '0'; -- Pulse on SWCLK rising edge synced to module clock
 begin
     ------------------------------------------------------------------------
     -- Clock divider for SWCLK
@@ -81,28 +101,56 @@ begin
     end process;
 
     ------------------------------------------------------------------------
-    -- [request_SendLineReset]
-    -- LINE_RESET_HIGH_BITS
-    -- LINE_RESET_LOW_BITS
-    -- reg_LineReset_InProgress
-    -- reg_LineReset_HighBitsToSend
-    -- reg_LineReset_LowBitsToSend
-    process (clock_SWCLK_Divided, request_SendLineReset)
+
+    instance_ProtocolClockPulse : entity CFXS.PulseGenerator
+        generic map(
+            IDLE_OUTPUT  => '0',
+            PULSE_LENGTH => 1
+        )
+        port map(
+            clock   => clock,
+            trigger => clock_SWCLK_Divided,
+            output  => reg_SWCLK_TriggerPulse
+        );
+
+    process (all)
     begin
-        if rising_edge(clock_SWCLK_Divided) then
-            if reg_Status_Busy = '0' and not reg_LineReset_InProgress and (request_SendLineReset = '1') then -- setup
-                reg_LineReset_InProgress     <= true;
-                reg_LineReset_HighBitsToSend <= to_unsigned(LINE_RESET_HIGH_BITS, RequiredBits(LINE_RESET_HIGH_BITS));
-                reg_LineReset_LowBitsToSend  <= to_unsigned(LINE_RESET_LOW_BITS, RequiredBits(LINE_RESET_LOW_BITS));
-                reg_SWDIO                    <= '1';
-            else -- send
-                if reg_LineReset_HighBitsToSend /= to_unsigned(0, reg_LineReset_HighBitsToSend'length) then
-                    reg_LineReset_HighBitsToSend <= reg_LineReset_HighBitsToSend - 1;
-                elsif reg_LineReset_LowBitsToSend /= to_unsigned(0, reg_LineReset_LowBitsToSend'length) then
-                    reg_LineReset_LowBitsToSend <= reg_LineReset_LowBitsToSend - 1;
-                    reg_SWDIO                   <= '0';
-                else
-                    reg_LineReset_InProgress <= false;
+        if rising_edge(clock) then
+            -- Select request to process if idle
+            if (reg_SWD_State = STATE_IDLE) then
+                en_SWCLK  <= false;     -- disable clock
+                dir_SWDIO <= DIR_INPUT; -- disable output
+
+                -- Line reset request
+                if (request_SendLineReset = '1') then
+                    reg_SWD_State            <= STATE_LINE_RESET;
+                    reg_SWD_SubState         <= SUB_LINE_RESET_HIGH;
+                    reg_LineReset_ClocksSent <= (others => '0');
+                end if;
+            end if;
+
+            if (reg_SWCLK_TriggerPulse = '1') then -- synced rising edge of protocol clock
+                -- [LINE_RESET]
+                if (reg_SWD_State = STATE_LINE_RESET) then
+                    en_SWCLK  <= true;       -- enable clock
+                    dir_SWDIO <= DIR_OUTPUT; -- enable output
+                    if (reg_SWD_SubState = SUB_LINE_RESET_HIGH) then
+                        reg_SWDIO <= '1';
+                        if (reg_LineReset_ClocksSent /= to_unsigned(LINE_RESET_HIGH_BITS, RequiredBits(LINE_RESET_HIGH_BITS))) then
+                            reg_LineReset_ClocksSent <= reg_LineReset_ClocksSent + 1;
+                        else
+                            reg_SWD_SubState         <= SUB_LINE_RESET_LOW;
+                            reg_LineReset_ClocksSent <= (others => '0');
+                        end if;
+                    elsif (reg_SWD_SubState = SUB_LINE_RESET_LOW) then
+                        reg_SWDIO <= '0';
+                        if (reg_LineReset_ClocksSent /= to_unsigned(LINE_RESET_LOW_BITS, RequiredBits(LINE_RESET_LOW_BITS))) then
+                            reg_LineReset_ClocksSent <= reg_LineReset_ClocksSent + 1;
+                        else
+                            reg_SWD_SubState <= SUB_IDLE;
+                            reg_SWD_State    <= STATE_IDLE;
+                        end if;
+                    end if;
                 end if;
             end if;
         end if;
@@ -119,14 +167,11 @@ begin
         target_swdio;
     -- clock enable
 
-    en_SWCLK <= reg_LineReset_InProgress;
-
     target_swclk <= clock_SWCLK_Divided when en_SWCLK else
         '1';
     -------------------------------------
     -- [Status signals]
     -- Busy signal
-    reg_Status_Busy <= '1' when reg_LineReset_InProgress else
+    status_Busy <= '1' when reg_SWD_State /= STATE_IDLE else
         '0';
-    status_Busy <= reg_Status_Busy;
 end architecture;
