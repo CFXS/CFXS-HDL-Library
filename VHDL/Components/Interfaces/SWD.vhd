@@ -37,8 +37,7 @@ end entity;
 
 architecture RTL of Interface_SWD is
     -- Clock divider counter from high speed module clock to target SWCLK
-    signal reg_SWCLK_DividerCounter : unsigned(SWCLK_DIV_WIDTH - 1 downto 0) := (others => '0');
-    signal clock_SWCLK_Divided      : std_logic                              := '0';
+    signal clock_SWCLK_Divided : std_logic := '0';
 
     -- [SendLineReset]
     constant LINE_RESET_HIGH_BITS : natural := 60 - 1; -- at least 50 clocks required
@@ -83,20 +82,14 @@ architecture RTL of Interface_SWD is
 begin
     ------------------------------------------------------------------------
     -- Clock divider for SWCLK
-    process (clock, cfg_SWCLK_Divider)
-    begin
-        if clock'event and clock = SWCLK_DIV_EDGE then
-            if reg_SWCLK_DividerCounter < cfg_SWCLK_Divider then
-                reg_SWCLK_DividerCounter <= reg_SWCLK_DividerCounter + 1;
-            else
-                reg_SWCLK_DividerCounter <= (others => '0');
-                clock_SWCLK_Divided      <= not clock_SWCLK_Divided;
-            end if;
-        end if;
-    end process;
+    instance_SWDCLK_Divider : entity CFXS.ClockDivider
+        port map(
+            divider   => cfg_SWCLK_Divider,
+            clock     => clock,
+            clock_div => clock_SWCLK_Divided
+        );
 
     ------------------------------------------------------------------------
-
     -- Generate 1 clock long pulse on protocol clock edge
     instance_ProtocolClockPulse : entity CFXS.PulseGenerator
         generic map(
@@ -109,6 +102,8 @@ begin
             output  => reg_SWCLK_EdgePulse
         );
 
+    ------------------------------------------------------------------------
+    -- SWD State Machine
     process (all)
     begin
         if rising_edge(clock) then
@@ -154,19 +149,23 @@ begin
 
     ------------------------------------------------------------------------
     -- [SWD] signal mapping
+
     -- SWDIO direction selection
     target_swdio <= reg_SWDIO when dir_SWDIO = DIR_OUTPUT else
         'Z';
+
     -- SWDIO mirror to debug output
     mirror_target_swdio <= '0' when USE_SWDIO_MIRROR = false else
         reg_SWDIO when dir_SWDIO = DIR_OUTPUT else
         target_swdio;
-    -- clock enable
 
+    -- clock enable
     target_swclk <= clock_SWCLK_Divided when en_SWCLK else
         '1';
-    -------------------------------------
+
+    ------------------------------------------------------------------------
     -- [Status signals]
+
     -- Busy signal
     status_Busy <= '1' when reg_SWD_State /= STATE_IDLE else
         '0';
