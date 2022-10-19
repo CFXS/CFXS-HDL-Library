@@ -2,7 +2,7 @@ library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 library CFXS;
-use CFXS.Utils.RequiredBits;
+use CFXS.Utils.all;
 
 entity CascadeClockDivider is
     generic (
@@ -16,7 +16,7 @@ entity CascadeClockDivider is
 end entity;
 
 architecture RTL of CascadeClockDivider is
-    signal reg_Counter : unsigned(RequiredBits(2 ** (N - 1)) - 1 downto 0) := (others => '0');
+    signal reg_Counter : unsigned(HighBit(2 ** (N - 1)) downto 0) := (others => '0');
 begin
     process (all)
     begin

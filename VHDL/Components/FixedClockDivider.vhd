@@ -2,7 +2,7 @@ library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 library CFXS;
-use CFXS.Utils.RequiredBits;
+use CFXS.Utils.all;
 
 entity FixedClockDivider is
     generic (
@@ -16,7 +16,7 @@ entity FixedClockDivider is
 end entity;
 
 architecture RTL of FixedClockDivider is
-    signal reg_Counter : unsigned(RequiredBits(DIVIDER) - 1 downto 0) := (others => '0');
+    signal reg_Counter : unsigned(HighBit(DIVIDER) downto 0) := (others => '0');
 begin
     process (all)
     begin
