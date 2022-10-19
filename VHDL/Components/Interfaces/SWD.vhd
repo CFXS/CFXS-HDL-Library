@@ -30,9 +30,7 @@ entity Interface_SWD is
         request_WriteData          : in std_logic := '0'; -- Request SWD Write
 
         -- Protocol
-        swd_APnDP   : in std_logic;                      -- SWD header APnDP
-        swd_RnW     : in std_logic;                      -- SWD header RnW
-        swd_Address : in std_logic_vector(1 downto 0);   -- SWD header Address
+        swd_Header  : in std_logic_vector(7 downto 0);   -- SWD packet header to send
         swd_DataOut : in std_logic_vector(31 downto 0);  -- SWD data to send
         swd_DataIn  : out std_logic_vector(31 downto 0); -- SWD read transfer data
 
@@ -163,7 +161,7 @@ begin
                     -- RnW    : 1;
                     -- APnDP  : 1;
                     -- Start  : 1; 1
-                    reg_SWD_HeaderBuffer <= ("10" & (swd_APnDP xor swd_RnW xor swd_Address(1) xor swd_Address(0)) & swd_Address(1) & swd_Address(0) & swd_RnW & swd_APnDP & '1');
+                    reg_SWD_HeaderBuffer <= swd_Header;
                     reg_SWD_Parity       <= '0';
                 end if;
             end if;
@@ -245,13 +243,12 @@ begin
                     -- no elsif because there is no turnaround cycle
                     if (reg_SWD_SubState = SUB_WORD_IN and clock_SWCLK_Divided = '1') then -- falling edge data phase
                         if (reg_SWD_ClocksSent /= 33) then
+                            reg_SWD_Parity     <= reg_SWD_Parity xor target_swdio;
                             reg_SWD_DataBuffer <= reg_SWD_DataBuffer(reg_SWD_DataBuffer'high - 1 downto 0) & target_swdio;
                             reg_SWD_ClocksSent <= reg_SWD_ClocksSent + 1;
                         else
                             reg_SWD_State      <= STATE_IDLE;
                             reg_SWD_SubState   <= SUB_IDLE;
-                            reg_SWDIO          <= '1';
-                            dir_SWDIO          <= DIR_OUTPUT;
                             reg_SWD_ClocksSent <= (others => '0');
                         end if;
                     end if;
@@ -275,6 +272,10 @@ begin
     -- clock enable
     target_swclk <= clock_SWCLK_Divided when en_SWCLK else
         '1';
+
+    -- Data buffer to data input
+    swd_DataIn         <= reg_SWD_DataBuffer(reg_SWD_DataBuffer'high downto 1);
+    status_ParityError <= reg_SWD_Parity; -- If parity register is 1, then parity is not correct
 
     ------------------------------------------------------------------------
     -- [Status signals]
