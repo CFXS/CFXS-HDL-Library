@@ -273,8 +273,11 @@ begin
     target_swclk <= clock_SWCLK_Divided when en_SWCLK else
         '1';
 
-    -- Data buffer to data input
-    swd_DataIn         <= reg_SWD_DataBuffer(reg_SWD_DataBuffer'high downto 1);
+    -- Data buffer to data input reverse order
+    gen_DataInReverse : for i in 0 to swd_DataIn'high generate
+        swd_DataIn(i) <= reg_SWD_DataBuffer(reg_SWD_DataBuffer'high - i);
+    end generate;
+
     status_ParityError <= reg_SWD_Parity; -- If parity register is 1, then parity is not correct
 
     ------------------------------------------------------------------------
