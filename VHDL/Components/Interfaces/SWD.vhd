@@ -4,6 +4,9 @@ use ieee.numeric_std.all;
 library CFXS;
 use CFXS.Utils.all;
 
+-- TODO: Shift output buffer on other clock edge in one place to reduce LE usage
+-- TODO: Use the before mentioned other edge shifted buffer to hold the header, also to reduce LE usage when shifting
+
 -- ARM SerialWireDebug Interface
 entity Interface_SWD is
     generic (
@@ -35,9 +38,9 @@ entity Interface_SWD is
         swd_DataIn  : out std_logic_vector(31 downto 0); -- SWD read transfer data
 
         -- Status
-        status_Busy         : out std_logic; -- some operation is in progress
-        status_ParityError  : out std_logic; -- SWD operation data bad parity bit
-        status_TransferDone : out std_logic; -- SWD read/write transfer finished
+        status_Busy         : out std_logic;        -- some operation is in progress
+        status_ParityError  : out std_logic;        -- SWD operation data bad parity bit
+        status_TransferDone : out std_logic := '1'; -- SWD read/write transfer finished
 
         -- Pin mirror output (for debugging)
         mirror_target_swdio : out std_logic
@@ -52,7 +55,7 @@ architecture RTL of Interface_SWD is
     -- [SendLineReset / SendSwitchSequence]
     constant LINE_RESET_HIGH_BITS      : natural                       := 56 - 1;    -- at least 50 clocks required
     constant LINE_RESET_LOW_BITS       : natural                       := 2;         -- at least 2 idle bits required to complete reset
-    constant SWD_SWITCH_SEQUENCE_DATA  : std_logic_vector(15 downto 0) := 16x"E79E"; -- JTAG -> SWD pattern
+    constant SWD_SWITCH_SEQUENCE_DATA  : std_logic_vector(32 downto 0) := 33x"E79E"; -- JTAG -> SWD pattern
     signal reg_SwitchSequence_DataSent : boolean                       := false;     -- Switch data pattern sent
 
     -- SWDIO direction control
@@ -163,6 +166,7 @@ begin
                     -- Start  : 1; 1
                     reg_SWD_HeaderBuffer <= swd_Header;
                     reg_SWD_Parity       <= '0';
+                    status_TransferDone  <= '0';
                 end if;
             end if;
 
@@ -180,8 +184,8 @@ begin
                                 reg_SWD_ClocksSent <= reg_SWD_ClocksSent + 1;
                             else
                                 if (reg_SWD_State = STATE_SWITCH_SEQUENCE and reg_SwitchSequence_DataSent = false) then
-                                    reg_SWD_SubState                <= SUB_SWITCH_DATA;
-                                    reg_SWD_DataBuffer(15 downto 0) <= SWD_SWITCH_SEQUENCE_DATA;
+                                    reg_SWD_SubState   <= SUB_SWITCH_DATA;
+                                    reg_SWD_DataBuffer <= SWD_SWITCH_SEQUENCE_DATA;
                                 else
                                     reg_SWD_SubState <= SUB_LINE_RESET_LOW;
                                 end if;
@@ -231,7 +235,7 @@ begin
                         -- Read ack code
                         if (reg_SWD_ClocksSent /= 3) then
                             -- shift in from swdio
-                            -- TODO: check if small range shift is more LE-efficient
+                            -- Note: Small range shift is NOT more LE-efficient, shift full range
                             reg_SWD_HeaderBuffer <= reg_SWD_HeaderBuffer(reg_SWD_HeaderBuffer'high - 1 downto 0) & target_swdio;
                             reg_SWD_ClocksSent   <= reg_SWD_ClocksSent + 1;
                         else
@@ -247,9 +251,10 @@ begin
                             reg_SWD_DataBuffer <= reg_SWD_DataBuffer(reg_SWD_DataBuffer'high - 1 downto 0) & target_swdio;
                             reg_SWD_ClocksSent <= reg_SWD_ClocksSent + 1;
                         else
-                            reg_SWD_State      <= STATE_IDLE;
-                            reg_SWD_SubState   <= SUB_IDLE;
-                            reg_SWD_ClocksSent <= (others => '0');
+                            reg_SWD_State       <= STATE_IDLE;
+                            reg_SWD_SubState    <= SUB_IDLE;
+                            reg_SWD_ClocksSent  <= (others => '0');
+                            status_TransferDone <= '1';
                         end if;
                     end if;
                 end if;
